@@ -9,6 +9,8 @@ app.Configure(config =>
     config.AddCommand<HashObjectCommand>("hash-object");
     config.AddCommand<AddCommand>("add");
     config.AddCommand<CommitCommand>("commit");
+    config.AddCommand<BranchCommand>("branch");
+    config.AddCommand<CheckoutCommand>("checkout");
 });
 
 return app.Run(args);
