@@ -97,8 +97,8 @@ public abstract class GitObject
         GitObject obj = type switch
         {
             "blob" => new GitBlob(content),
-            // "tree" => new Tree(content),
-            // "commit" => new Commit(content),
+            // "tree" => new GitTree(content),
+            "commit" => new GitCommit(content),
             _ => throw new NotSupportedException($"Git object type '{type}' is not supported.")
         };
 

@@ -68,6 +68,93 @@ internal class Repository
         return gitObject;
     }
 
+    public string Commit(string message)
+    {
+        GitIndex index = new GitIndex(GitDir);
+
+        if (index.Entries.Count == 0)
+            throw new InvalidOperationException("nothing to commit");
+
+        string objectsDir = Path.Combine(GitDir, "objects");
+
+        // Build tree hierarchy from flat index entries
+        var entries = index.Entries.Select(e =>
+            (Path: e.Path, Sha: Convert.ToHexString(e.Sha).ToLower()));
+        string treeSha = BuildTreeFromIndex(entries, objectsDir);
+
+        // Resolve parent commit from HEAD
+        ReferenceManager refs = new ReferenceManager(GitDir);
+        string? parentSha = refs.ResolveHead();
+
+        // Abort if the tree is identical to the parent commit's tree
+        if (parentSha is not null)
+        {
+            GitObject parentObj = GitObject.Read(parentSha, objectsDir);
+            if (parentObj is GitCommit parentCommit && parentCommit.TreeSha == treeSha)
+                throw new InvalidOperationException("nothing to commit, working tree clean");
+        }
+
+        // Create and write the commit object
+        GitCommit commit = new GitCommit(
+            treeSha: treeSha,
+            parentSha: parentSha,
+            author: "Lit User <lit@example.com>",
+            committer: "Lit User <lit@example.com>",
+            message: message
+        );
+        commit.Write(objectsDir);
+
+        // Update the branch ref
+        refs.UpdateHead(commit.Sha);
+
+        return commit.Sha;
+    }
+
+    private string BuildTreeFromIndex(IEnumerable<(string Path, string Sha)> entries, string objectsDir)
+    {
+        GitTree tree = new GitTree();
+
+        // Separate files in this directory from files in subdirectories
+        var grouped = entries.GroupBy(e =>
+        {
+            int slash = e.Path.IndexOf('/');
+            return slash == -1 ? (string?)null : e.Path[..slash];
+        });
+
+        foreach (var group in grouped)
+        {
+            if (group.Key is null)
+            {
+                // Direct file children
+                foreach (var entry in group)
+                {
+                    tree.Entries.Add(new GitTreeEntry
+                    {
+                        Mode = "100644",
+                        Name = entry.Path,
+                        Sha = entry.Sha
+                    });
+                }
+            }
+            else
+            {
+                // Subdirectory — recurse with stripped paths
+                var subEntries = group.Select(e => (Path: e.Path[(group.Key.Length + 1)..], e.Sha));
+                string subTreeSha = BuildTreeFromIndex(subEntries, objectsDir);
+
+                tree.Entries.Add(new GitTreeEntry
+                {
+                    Mode = "40000",
+                    Name = group.Key,
+                    Sha = subTreeSha
+                });
+            }
+        }
+
+        tree.Write(objectsDir);
+        return tree.ComputeHash();
+    }
+
     public void Add(string filePath)
     {
         string fullPath = Path.GetFullPath(filePath);
