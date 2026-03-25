@@ -1,6 +1,5 @@
 ﻿using GitFromScratch.Models;
-using System;
-using System.Collections.Generic;
+using GitFromScratch.Staging;
 using System.Text;
 
 namespace GitFromScratch;
@@ -10,8 +9,8 @@ internal class Repository
     public string WorkDir { get; }
     public string GitDir { get; set; }
 
-    private Repository(string workDir) 
-    { 
+    private Repository(string workDir)
+    {
         WorkDir = Path.GetFullPath(workDir);
         GitDir = Path.Combine(workDir, ".git");
     }
@@ -39,9 +38,9 @@ internal class Repository
     {
         DirectoryInfo? dir = new DirectoryInfo(Path.GetFullPath(path));
 
-        while(dir is not null)
+        while (dir is not null)
         {
-            if(Directory.Exists(Path.Combine(dir.FullName, ".git")))
+            if (Directory.Exists(Path.Combine(dir.FullName, ".git")))
                 return new Repository(dir.FullName);
             dir = dir.Parent;
         }
@@ -50,7 +49,10 @@ internal class Repository
 
     public GitObject HashObject(string filePath, string type = "blob", bool write = false)
     {
-        byte[]? fileContent = File.ReadAllBytes(filePath);
+        byte[] fileContent = File.ReadAllBytes(filePath);
+
+        // Git normalizes line endings (CRLF → LF) before hashing
+        fileContent = NormalizeLineEndings(fileContent);
 
         GitObject gitObject = type switch
         {
@@ -60,9 +62,27 @@ internal class Repository
 
         if (write)
         {
-            gitObject.Write(Path.Combine(GitDir, ".objects"));
+            gitObject.Write(Path.Combine(GitDir, "objects"));
         }
 
         return gitObject;
+    }
+
+    public void Add(string filePath)
+    {
+        string fullPath = Path.GetFullPath(filePath);
+        string relativePath = Path.GetRelativePath(WorkDir, fullPath).Replace('\\', '/');
+
+        GitBlob blob = (GitBlob)HashObject(fullPath, write: true);
+
+        GitIndex index = new GitIndex(GitDir);
+        index.Add(relativePath, blob, new FileInfo(fullPath));
+    }
+
+    private static byte[] NormalizeLineEndings(byte[] data)
+    {
+        string text = Encoding.UTF8.GetString(data);
+        text = text.Replace("\r\n", "\n");
+        return Encoding.UTF8.GetBytes(text);
     }
 }

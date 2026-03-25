@@ -7,6 +7,7 @@ app.Configure(config =>
 {
     config.AddCommand<InitRepoCommand>("init");
     config.AddCommand<HashObjectCommand>("hash-object");
+    config.AddCommand<AddCommand>("add");
 });
 
 return app.Run(args);
