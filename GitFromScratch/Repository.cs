@@ -71,12 +71,28 @@ internal class Repository
     public void Add(string filePath)
     {
         string fullPath = Path.GetFullPath(filePath);
-        string relativePath = Path.GetRelativePath(WorkDir, fullPath).Replace('\\', '/');
 
-        GitBlob blob = (GitBlob)HashObject(fullPath, write: true);
+        IEnumerable<string> files;
+        if (Directory.Exists(fullPath))
+        {
+            files = Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories);
+        }
+        else
+        {
+            files = [fullPath];
+        }
 
         GitIndex index = new GitIndex(GitDir);
-        index.Add(relativePath, blob, new FileInfo(fullPath));
+
+        foreach (string file in files)
+        {
+            string relativePath = Path.GetRelativePath(WorkDir, file).Replace('\\', '/');
+            GitBlob blob = (GitBlob)HashObject(file, write: true);
+            index.Add(relativePath, blob, new FileInfo(file));
+        }
+
+        index.SortEntries();
+        index.Save();
     }
 
     private static byte[] NormalizeLineEndings(byte[] data)

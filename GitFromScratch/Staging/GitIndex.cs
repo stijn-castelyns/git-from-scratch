@@ -33,8 +33,6 @@ public class GitIndex
             Path = relativePath,
             Stage = 0
         });
-        SortEntries();
-        Save();
     }
 
     // ──────────────────────── CONFLICT STAGING ────────────────────
@@ -56,7 +54,9 @@ public class GitIndex
     public void ResolveConflict(string relativePath, GitBlob resolvedBlob, FileInfo fi)
     {
         Entries.RemoveAll(e => e.Path == relativePath);
-        Add(relativePath, resolvedBlob, fi); // Add already calls Save()
+        Add(relativePath, resolvedBlob, fi);
+        SortEntries();
+        Save();
     }
 
     public bool HasConflicts() => Entries.Any(e => e.Stage != 0);
@@ -78,7 +78,7 @@ public class GitIndex
         });
     }
 
-    private void SortEntries()
+    public void SortEntries()
     {
         Entries = Entries
             .OrderBy(e => e.Path, StringComparer.Ordinal)
@@ -92,7 +92,7 @@ public class GitIndex
     /// Writes Git's binary index format (version 2).
     /// Layout: "DIRC" | version(4) | count(4) | entries... | SHA-1 checksum(20)
     /// </summary>
-    private void Save()
+    public void Save()
     {
         using MemoryStream ms = new MemoryStream();
         using BinaryWriter bw = new BinaryWriter(ms);
