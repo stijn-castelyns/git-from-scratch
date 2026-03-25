@@ -11,6 +11,7 @@ app.Configure(config =>
     config.AddCommand<CommitCommand>("commit");
     config.AddCommand<BranchCommand>("branch");
     config.AddCommand<CheckoutCommand>("checkout");
+    config.AddCommand<MergeCommand>("merge");
 });
 
 return app.Run(args);

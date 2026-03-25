@@ -6,7 +6,8 @@ public class GitCommit : GitObject
 {
     public override string Type => "commit";
     public string TreeSha { get; }
-    public string? ParentSha { get; }
+    public List<string> Parents { get; } = new();
+    public string? ParentSha => Parents.Count > 0 ? Parents[0] : null;
     public string Author { get; }
     public string Committer { get; }
     public string Message { get; }
@@ -15,10 +16,10 @@ public class GitCommit : GitObject
 
     private readonly byte[] _rawContent;
 
-    public GitCommit(string treeSha, string? parentSha, string author, string committer, string message)
+    public GitCommit(string treeSha, IEnumerable<string> parents, string author, string committer, string message)
     {
         TreeSha = treeSha;
-        ParentSha = parentSha;
+        Parents = parents.ToList();
         Author = author;
         Committer = committer;
         Message = message;
@@ -41,7 +42,7 @@ public class GitCommit : GitObject
             if (line.StartsWith("tree "))
                 TreeSha = line[5..];
             else if (line.StartsWith("parent "))
-                ParentSha = line[7..];
+                Parents.Add(line[7..]);
             else if (line.StartsWith("author "))
                 Author = line[7..];
             else if (line.StartsWith("committer "))
@@ -69,8 +70,8 @@ public class GitCommit : GitObject
 
         sb.Append($"tree {TreeSha}\n");
 
-        if (ParentSha is not null)
-            sb.Append($"parent {ParentSha}\n");
+        foreach (string parent in Parents)
+            sb.Append($"parent {parent}\n");
 
         sb.Append($"author {Author} {_timestamp} +0000\n");
         sb.Append($"committer {Committer} {_timestamp} +0000\n");

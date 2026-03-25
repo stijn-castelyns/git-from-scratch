@@ -84,12 +84,24 @@ internal class Repository
             new FileEntry(e.Path, Convert.ToHexString(e.Sha).ToLower()));
         string treeSha = BuildTreeFromIndex(entries);
 
-        // Resolve parent commit from HEAD
+        // Resolve parent commit(s) from HEAD
         ReferenceManager refs = new ReferenceManager(GitDir);
         string? parentSha = refs.ResolveHead();
 
-        // Abort if the tree is identical to the parent commit's tree
+        List<string> parents = new();
         if (parentSha is not null)
+            parents.Add(parentSha);
+
+        // Check for MERGE_HEAD (set during merge with conflicts)
+        string mergeHeadPath = Path.Combine(GitDir, "MERGE_HEAD");
+        if (File.Exists(mergeHeadPath))
+        {
+            string mergeHead = File.ReadAllText(mergeHeadPath).Trim();
+            parents.Add(mergeHead);
+        }
+
+        // Abort if the tree is identical to the parent commit's tree
+        if (parentSha is not null && !File.Exists(mergeHeadPath))
         {
             GitObject parentObj = GitObject.Read(parentSha, ObjectsDir);
             if (parentObj is GitCommit parentCommit && parentCommit.TreeSha == treeSha)
@@ -99,7 +111,7 @@ internal class Repository
         // Create and write the commit object
         GitCommit commit = new GitCommit(
             treeSha: treeSha,
-            parentSha: parentSha,
+            parents: parents,
             author: "Lit User <lit@example.com>",
             committer: "Lit User <lit@example.com>",
             message: message
@@ -108,6 +120,10 @@ internal class Repository
 
         // Update the branch ref
         refs.UpdateHead(commit.Sha);
+
+        // Clean up merge state
+        if (File.Exists(mergeHeadPath))
+            File.Delete(mergeHeadPath);
 
         return commit.Sha;
     }
@@ -247,6 +263,322 @@ internal class Repository
 
         // Update HEAD to point to the new branch
         refs.SetHead(branchName);
+    }
+
+    public enum MergeResult { FastForward, Merged, Conflict }
+
+    public MergeResult Merge(string branchName)
+    {
+        ReferenceManager refs = new ReferenceManager(GitDir);
+
+        if (!refs.BranchExists(branchName))
+            throw new InvalidOperationException($"merge: '{branchName}' - not something we can merge");
+
+        string currentBranch = refs.GetCurrentBranch();
+        if (currentBranch == branchName)
+            throw new InvalidOperationException("Already up to date.");
+
+        string? oursSha = refs.ResolveHead();
+        string? theirsSha = refs.ResolveBranch(branchName);
+
+        if (theirsSha is null)
+            throw new InvalidOperationException("Already up to date.");
+
+        if (oursSha is null)
+        {
+            // No commits on current branch — just fast-forward
+            refs.UpdateHead(theirsSha);
+            CheckoutTree(theirsSha);
+            return MergeResult.FastForward;
+        }
+
+        if (oursSha == theirsSha)
+            throw new InvalidOperationException("Already up to date.");
+
+        // Find the merge base
+        string? baseSha = FindMergeBase(oursSha, theirsSha);
+
+        // Fast-forward: current branch is an ancestor of target
+        if (baseSha == oursSha)
+        {
+            refs.UpdateHead(theirsSha);
+            CheckoutTree(theirsSha);
+            return MergeResult.FastForward;
+        }
+
+        // Already up to date: target is an ancestor of current branch
+        if (baseSha == theirsSha)
+            throw new InvalidOperationException("Already up to date.");
+
+        // Three-way merge
+        Dictionary<string, string> baseFiles = GetTreeFiles(baseSha);
+        Dictionary<string, string> oursFiles = GetTreeFiles(oursSha);
+        Dictionary<string, string> theirsFiles = GetTreeFiles(theirsSha);
+
+        // Collect all paths
+        HashSet<string> allPaths = new(baseFiles.Keys);
+        allPaths.UnionWith(oursFiles.Keys);
+        allPaths.UnionWith(theirsFiles.Keys);
+
+        GitIndex index = new GitIndex(GitDir);
+        index.Entries.Clear();
+        List<string> conflicts = new();
+
+        foreach (string path in allPaths.OrderBy(p => p, StringComparer.Ordinal))
+        {
+            baseFiles.TryGetValue(path, out string? baseBlobSha);
+            oursFiles.TryGetValue(path, out string? oursBlobSha);
+            theirsFiles.TryGetValue(path, out string? theirsBlobSha);
+
+            // All three agree — keep as-is
+            if (oursBlobSha == theirsBlobSha)
+            {
+                // Both sides same (or both deleted)
+                string? keepSha = oursBlobSha;
+                if (keepSha is not null)
+                    AddToIndexAndWorkTree(index, path, keepSha);
+                continue;
+            }
+
+            if (oursBlobSha == baseBlobSha)
+            {
+                // Only theirs changed
+                if (theirsBlobSha is not null)
+                    AddToIndexAndWorkTree(index, path, theirsBlobSha);
+                else
+                    DeleteFromWorkTree(path); // Deleted by theirs
+                continue;
+            }
+
+            if (theirsBlobSha == baseBlobSha)
+            {
+                // Only ours changed
+                if (oursBlobSha is not null)
+                    AddToIndexAndWorkTree(index, path, oursBlobSha);
+                else
+                    DeleteFromWorkTree(path); // Deleted by ours
+                continue;
+            }
+
+            // Both sides changed differently — conflict
+            conflicts.Add(path);
+            WriteConflictMarkers(path, baseBlobSha, oursBlobSha, theirsBlobSha, currentBranch, branchName);
+
+            // Stage conflict entries in the index
+            if (baseBlobSha is not null)
+                AddAtStageToIndex(index, path, baseBlobSha, 1);
+            if (oursBlobSha is not null)
+                AddAtStageToIndex(index, path, oursBlobSha, 2);
+            if (theirsBlobSha is not null)
+                AddAtStageToIndex(index, path, theirsBlobSha, 3);
+        }
+
+        index.SortEntries();
+        index.Save();
+
+        if (conflicts.Count > 0)
+        {
+            // Write MERGE_HEAD so the next commit becomes a merge commit
+            File.WriteAllText(Path.Combine(GitDir, "MERGE_HEAD"), theirsSha + "\n");
+            return MergeResult.Conflict;
+        }
+
+        // No conflicts — create the merge commit
+        IEnumerable<FileEntry> entries = index.Entries.Select(e =>
+            new FileEntry(e.Path, Convert.ToHexString(e.Sha).ToLower()));
+        string treeSha = BuildTreeFromIndex(entries);
+
+        GitCommit mergeCommit = new GitCommit(
+            treeSha: treeSha,
+            parents: new[] { oursSha, theirsSha },
+            author: "Lit User <lit@example.com>",
+            committer: "Lit User <lit@example.com>",
+            message: $"Merge branch '{branchName}'"
+        );
+        mergeCommit.Write(ObjectsDir);
+        refs.UpdateHead(mergeCommit.Sha);
+
+        return MergeResult.Merged;
+    }
+
+    private string? FindMergeBase(string sha1, string sha2)
+    {
+        // BFS from both commits, find first common ancestor
+        HashSet<string> ancestors1 = new();
+        HashSet<string> ancestors2 = new();
+        Queue<string> queue1 = new();
+        Queue<string> queue2 = new();
+
+        queue1.Enqueue(sha1);
+        queue2.Enqueue(sha2);
+        ancestors1.Add(sha1);
+        ancestors2.Add(sha2);
+
+        while (queue1.Count > 0 || queue2.Count > 0)
+        {
+            if (queue1.Count > 0)
+            {
+                string current = queue1.Dequeue();
+                if (ancestors2.Contains(current))
+                    return current;
+
+                GitObject obj = GitObject.Read(current, ObjectsDir);
+                if (obj is GitCommit commit)
+                {
+                    foreach (string parent in commit.Parents)
+                    {
+                        if (ancestors1.Add(parent))
+                            queue1.Enqueue(parent);
+                    }
+                }
+            }
+
+            if (queue2.Count > 0)
+            {
+                string current = queue2.Dequeue();
+                if (ancestors1.Contains(current))
+                    return current;
+
+                GitObject obj = GitObject.Read(current, ObjectsDir);
+                if (obj is GitCommit commit)
+                {
+                    foreach (string parent in commit.Parents)
+                    {
+                        if (ancestors2.Add(parent))
+                            queue2.Enqueue(parent);
+                    }
+                }
+            }
+        }
+
+        return null; // No common ancestor
+    }
+
+    private Dictionary<string, string> GetTreeFiles(string? commitSha)
+    {
+        if (commitSha is null)
+            return new Dictionary<string, string>();
+
+        GitObject obj = GitObject.Read(commitSha, ObjectsDir);
+        if (obj is not GitCommit commit)
+            return new Dictionary<string, string>();
+
+        List<GitTreeEntry> entries = GitTree.Flatten(commit.TreeSha, ObjectsDir);
+        return entries.ToDictionary(e => e.Name, e => e.Sha);
+    }
+
+    private void AddToIndexAndWorkTree(GitIndex index, string path, string blobSha)
+    {
+        // Write file to working directory
+        GitObject obj = GitObject.Read(blobSha, ObjectsDir);
+        if (obj is not GitBlob blob)
+            throw new InvalidOperationException($"fatal: expected blob for {path}");
+
+        string filePath = Path.Combine(WorkDir, path.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        File.WriteAllBytes(filePath, blob.Data);
+
+        // Add to index
+        FileInfo fi = new FileInfo(filePath);
+        index.Add(path, blob, fi);
+    }
+
+    private void AddAtStageToIndex(GitIndex index, string path, string sha, int stage)
+    {
+        index.Entries.Add(new GitIndexEntry
+        {
+            Mode = 0x81A4,
+            Sha = Convert.FromHexString(sha),
+            Path = path,
+            Stage = stage
+        });
+    }
+
+    private void DeleteFromWorkTree(string path)
+    {
+        string filePath = Path.Combine(WorkDir, path.Replace('/', Path.DirectorySeparatorChar));
+        if (File.Exists(filePath))
+            File.Delete(filePath);
+
+        // Clean up empty directories
+        string? dir = Path.GetDirectoryName(filePath);
+        while (dir != null && dir != WorkDir && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
+        {
+            Directory.Delete(dir);
+            dir = Path.GetDirectoryName(dir);
+        }
+    }
+
+    private void WriteConflictMarkers(string path, string? baseSha, string? oursSha, string? theirsSha, string currentBranch, string theirsBranch)
+    {
+        string oursContent = oursSha is not null ? ReadBlobContent(oursSha) : "";
+        string theirsContent = theirsSha is not null ? ReadBlobContent(theirsSha) : "";
+
+        StringBuilder sb = new();
+        sb.AppendLine($"<<<<<<< {currentBranch}");
+        sb.Append(oursContent);
+        if (!oursContent.EndsWith('\n')) sb.AppendLine();
+        sb.AppendLine("=======");
+        sb.Append(theirsContent);
+        if (!theirsContent.EndsWith('\n')) sb.AppendLine();
+        sb.AppendLine($">>>>>>> {theirsBranch}");
+
+        string filePath = Path.Combine(WorkDir, path.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        File.WriteAllText(filePath, sb.ToString());
+    }
+
+    private string ReadBlobContent(string sha)
+    {
+        GitObject obj = GitObject.Read(sha, ObjectsDir);
+        if (obj is not GitBlob blob)
+            return "";
+        return Encoding.UTF8.GetString(blob.Data);
+    }
+
+    private void CheckoutTree(string commitSha)
+    {
+        // Remove current tracked files
+        GitIndex currentIndex = new GitIndex(GitDir);
+        foreach (GitIndexEntry entry in currentIndex.Entries)
+        {
+            string filePath = Path.Combine(WorkDir, entry.Path.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(filePath))
+                File.Delete(filePath);
+
+            string? dir = Path.GetDirectoryName(filePath);
+            while (dir != null && dir != WorkDir && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
+            {
+                Directory.Delete(dir);
+                dir = Path.GetDirectoryName(dir);
+            }
+        }
+
+        // Write target tree files
+        GitObject commitObj = GitObject.Read(commitSha, ObjectsDir);
+        if (commitObj is not GitCommit targetCommit)
+            throw new InvalidOperationException("fatal: not a commit object");
+
+        List<GitTreeEntry> targetFiles = GitTree.Flatten(targetCommit.TreeSha, ObjectsDir);
+        GitIndex newIndex = new GitIndex(GitDir);
+        newIndex.Entries.Clear();
+
+        foreach (GitTreeEntry treeEntry in targetFiles)
+        {
+            GitObject blobObj = GitObject.Read(treeEntry.Sha, ObjectsDir);
+            if (blobObj is not GitBlob blob)
+                throw new InvalidOperationException($"fatal: expected blob for {treeEntry.Name}");
+
+            string filePath = Path.Combine(WorkDir, treeEntry.Name.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            File.WriteAllBytes(filePath, blob.Data);
+
+            FileInfo fi = new FileInfo(filePath);
+            newIndex.Add(treeEntry.Name, blob, fi);
+        }
+
+        newIndex.SortEntries();
+        newIndex.Save();
     }
 
     private static byte[] NormalizeLineEndings(byte[] data)
