@@ -1,5 +1,5 @@
 ﻿using GitFromScratch.Models;
-using System.Buffers.Binary;
+using GitFromScratch.Utils;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -62,7 +62,10 @@ public class GitIndex
     public bool HasConflicts() => Entries.Any(e => e.Stage != 0);
 
     public List<string> GetConflictedPaths() =>
-        Entries.Where(e => e.Stage != 0).Select(e => e.Path).Distinct().ToList();
+        Entries.Where(e => e.Stage != 0)
+               .Select(e => e.Path)
+               .Distinct()
+               .ToList();
 
     private void AddAtStage(string path, string sha, int stage)
     {
@@ -100,28 +103,7 @@ public class GitIndex
 
         foreach (GitIndexEntry entry in Entries)
         {
-            bw.WriteUInt32BE(entry.CTimeSec);
-            bw.WriteUInt32BE(entry.CTimeNano);
-            bw.WriteUInt32BE(entry.MTimeSec);
-            bw.WriteUInt32BE(entry.MTimeNano);
-            bw.WriteUInt32BE(entry.Dev);
-            bw.WriteUInt32BE(entry.Ino);
-            bw.WriteUInt32BE(entry.Mode);
-            bw.WriteUInt32BE(entry.Uid);
-            bw.WriteUInt32BE(entry.Gid);
-            bw.WriteUInt32BE(entry.FileSize);
-            bw.Write(entry.Sha);                   // 20 raw bytes
-            bw.WriteUInt16BE(entry.ComputeFlags()); // stage + name length
-
-            byte[] pathBytes = Encoding.UTF8.GetBytes(entry.Path);
-            bw.Write(pathBytes);
-            bw.Write((byte)0);  // null terminator
-
-            // Pad to 8-byte boundary
-            int entryLen = 62 + pathBytes.Length + 1;
-            int padding = (8 - (entryLen % 8)) % 8;
-            for (int i = 0; i < padding; i++)
-                bw.Write((byte)0);
+            entry.WriteToIndex(bw);
         }
 
         byte[] data = ms.ToArray();
@@ -153,66 +135,7 @@ public class GitIndex
 
         for (uint idx = 0; idx < count; idx++)
         {
-            long entryStart = ms.Position;
-
-            GitIndexEntry entry = new GitIndexEntry
-            {
-                CTimeSec = br.ReadUInt32BE(),
-                CTimeNano = br.ReadUInt32BE(),
-                MTimeSec = br.ReadUInt32BE(),
-                MTimeNano = br.ReadUInt32BE(),
-                Dev = br.ReadUInt32BE(),
-                Ino = br.ReadUInt32BE(),
-                Mode = br.ReadUInt32BE(),
-                Uid = br.ReadUInt32BE(),
-                Gid = br.ReadUInt32BE(),
-                FileSize = br.ReadUInt32BE(),
-                Sha = br.ReadBytes(20)
-            };
-
-            ushort flags = br.ReadUInt16BE();
-            entry.Stage = (flags >> 12) & 0x3;
-
-            List<byte> pathBytes = new List<byte>();
-            byte b;
-            while ((b = br.ReadByte()) != 0) pathBytes.Add(b);
-            entry.Path = Encoding.UTF8.GetString(pathBytes.ToArray());
-
-            long consumed = ms.Position - entryStart;
-            int pad = (int)((8 - (consumed % 8)) % 8);
-            if (pad > 0) br.ReadBytes(pad);
-
-            Entries.Add(entry);
+            Entries.Add(GitIndexEntry.ReadFromIndex(br));
         }
-    }
-}
-
-// ──────────────────────── BIG-ENDIAN EXTENSIONS ───────────────────
-
-public static class BinaryExtensions
-{
-    public static void WriteUInt32BE(this BinaryWriter bw, uint value)
-    {
-        Span<byte> buf = stackalloc byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(buf, value);
-        bw.Write(buf);
-    }
-    public static void WriteUInt16BE(this BinaryWriter bw, ushort value)
-    {
-        Span<byte> buf = stackalloc byte[2];
-        BinaryPrimitives.WriteUInt16BigEndian(buf, value);
-        bw.Write(buf);
-    }
-    public static uint ReadUInt32BE(this BinaryReader br)
-    {
-        Span<byte> buf = stackalloc byte[4];
-        br.BaseStream.ReadExactly(buf);
-        return BinaryPrimitives.ReadUInt32BigEndian(buf);
-    }
-    public static ushort ReadUInt16BE(this BinaryReader br)
-    {
-        Span<byte> buf = stackalloc byte[2];
-        br.BaseStream.ReadExactly(buf);
-        return BinaryPrimitives.ReadUInt16BigEndian(buf);
     }
 }
