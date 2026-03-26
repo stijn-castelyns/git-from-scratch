@@ -4,54 +4,33 @@ internal class ReferenceManager
 {
     private readonly string _gitDir;
 
-    public ReferenceManager(string gitDir)
-    {
-        _gitDir = gitDir;
-    }
+    public ReferenceManager(string gitDir) => _gitDir = gitDir;
 
-    /// <summary>
-    /// Resolves HEAD to a commit SHA. Returns null if the branch has no commits yet.
-    /// </summary>
     public string? ResolveHead()
     {
-        string headContent = File.ReadAllText(Path.Combine(_gitDir, "HEAD")).Trim();
-
-        if (headContent.StartsWith("ref: "))
-        {
-            string refPath = Path.Combine(_gitDir, headContent[5..].Replace('/', Path.DirectorySeparatorChar));
-            return File.Exists(refPath) ? File.ReadAllText(refPath).Trim() : null;
-        }
-
-        // Detached HEAD — raw SHA
-        return headContent;
+        var (isSymref, target) = ParseHead();
+        if (!isSymref) return target;
+        string refPath = Path.Combine(_gitDir, target.Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(refPath) ? File.ReadAllText(refPath).Trim() : null;
     }
 
-    /// <summary>
-    /// Updates the ref that HEAD points to with the given commit SHA.
-    /// </summary>
     public void UpdateHead(string commitSha)
     {
-        string headContent = File.ReadAllText(Path.Combine(_gitDir, "HEAD")).Trim();
-
-        if (!headContent.StartsWith("ref: "))
+        var (isSymref, target) = ParseHead();
+        if (!isSymref)
             throw new InvalidOperationException("HEAD is detached; cannot update ref.");
 
-        string refPath = Path.Combine(_gitDir, headContent[5..].Replace('/', Path.DirectorySeparatorChar));
+        string refPath = Path.Combine(_gitDir, target.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(refPath)!);
         File.WriteAllText(refPath, commitSha + "\n");
     }
 
-    /// <summary>
-    /// Creates a new branch pointing at the current HEAD commit.
-    /// </summary>
     public void CreateBranch(string branchName)
     {
-        string? commitSha = ResolveHead();
-        if (commitSha is null)
-            throw new InvalidOperationException("fatal: not a valid object name: 'HEAD'");
+        string? commitSha = ResolveHead()
+            ?? throw new InvalidOperationException("fatal: not a valid object name: 'HEAD'");
 
-        string refPath = Path.Combine(_gitDir, "refs", "heads", branchName.Replace('/', Path.DirectorySeparatorChar));
-
+        string refPath = BranchRefPath(branchName);
         if (File.Exists(refPath))
             throw new InvalidOperationException($"fatal: a branch named '{branchName}' already exists");
 
@@ -59,42 +38,31 @@ internal class ReferenceManager
         File.WriteAllText(refPath, commitSha + "\n");
     }
 
-    /// <summary>
-    /// Points HEAD at a different branch (symref update).
-    /// </summary>
-    public void SetHead(string branchName)
-    {
+    public void SetHead(string branchName) =>
         File.WriteAllText(Path.Combine(_gitDir, "HEAD"), $"ref: refs/heads/{branchName}\n");
-    }
 
-    /// <summary>
-    /// Returns true if the branch ref file exists.
-    /// </summary>
-    public bool BranchExists(string branchName)
-    {
-        string refPath = Path.Combine(_gitDir, "refs", "heads", branchName.Replace('/', Path.DirectorySeparatorChar));
-        return File.Exists(refPath);
-    }
+    public bool BranchExists(string branchName) => File.Exists(BranchRefPath(branchName));
 
-    /// <summary>
-    /// Resolves a branch name to a commit SHA.
-    /// </summary>
     public string? ResolveBranch(string branchName)
     {
-        string refPath = Path.Combine(_gitDir, "refs", "heads", branchName.Replace('/', Path.DirectorySeparatorChar));
+        string refPath = BranchRefPath(branchName);
         return File.Exists(refPath) ? File.ReadAllText(refPath).Trim() : null;
     }
 
-    /// <summary>
-    /// Returns the current branch name (e.g., "main").
-    /// </summary>
     public string GetCurrentBranch()
     {
-        string headContent = File.ReadAllText(Path.Combine(_gitDir, "HEAD")).Trim();
-
-        if (headContent.StartsWith("ref: refs/heads/"))
-            return headContent["ref: refs/heads/".Length..];
-
+        var (isSymref, target) = ParseHead();
+        if (isSymref && target.StartsWith("refs/heads/"))
+            return target["refs/heads/".Length..];
         throw new InvalidOperationException("HEAD is detached.");
     }
+
+    private (bool isSymref, string target) ParseHead()
+    {
+        string content = File.ReadAllText(Path.Combine(_gitDir, "HEAD")).Trim();
+        return content.StartsWith("ref: ") ? (true, content[5..]) : (false, content);
+    }
+
+    private string BranchRefPath(string name) =>
+        Path.Combine(_gitDir, "refs", "heads", name.Replace('/', Path.DirectorySeparatorChar));
 }

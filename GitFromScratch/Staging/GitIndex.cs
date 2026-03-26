@@ -35,39 +35,7 @@ public class GitIndex
         });
     }
 
-    // ──────────────────────── CONFLICT STAGING ────────────────────
-
-    public void AddConflict(
-        string relativePath,
-        string baseSha,
-        string oursSha,
-        string theirsSha)
-    {
-        Entries.RemoveAll(e => e.Path == relativePath);
-        if (baseSha != null) AddAtStage(relativePath, baseSha, stage: 1);
-        if (oursSha != null) AddAtStage(relativePath, oursSha, stage: 2);
-        if (theirsSha != null) AddAtStage(relativePath, theirsSha, stage: 3);
-        SortEntries();
-        Save();
-    }
-
-    public void ResolveConflict(string relativePath, GitBlob resolvedBlob, FileInfo fi)
-    {
-        Entries.RemoveAll(e => e.Path == relativePath);
-        Add(relativePath, resolvedBlob, fi);
-        SortEntries();
-        Save();
-    }
-
-    public bool HasConflicts() => Entries.Any(e => e.Stage != 0);
-
-    public List<string> GetConflictedPaths() =>
-        Entries.Where(e => e.Stage != 0)
-               .Select(e => e.Path)
-               .Distinct()
-               .ToList();
-
-    private void AddAtStage(string path, string sha, int stage)
+    public void AddAtStage(string path, string sha, int stage)
     {
         Entries.Add(new GitIndexEntry
         {

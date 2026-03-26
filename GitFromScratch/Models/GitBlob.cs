@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace GitFromScratch.Models;
+﻿namespace GitFromScratch.Models;
 
 public class GitBlob : GitObject
 {

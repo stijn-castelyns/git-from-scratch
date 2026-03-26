@@ -15,17 +15,17 @@ public class MergeCommand : Command<MergeCommand.Settings>
     {
         Repository repo = Repository.Open(".");
 
-        Repository.MergeResult result = repo.Merge(settings.Branch);
+        MergeResult result = repo.Merge(settings.Branch);
 
         switch (result)
         {
-            case Repository.MergeResult.FastForward:
+            case MergeResult.FastForward:
                 AnsiConsole.MarkupLine($"[green]Fast-forward[/]");
                 break;
-            case Repository.MergeResult.Merged:
+            case MergeResult.Merged:
                 AnsiConsole.MarkupLine($"[green]Merge made by the 'ort' strategy.[/]");
                 break;
-            case Repository.MergeResult.Conflict:
+            case MergeResult.Conflict:
                 AnsiConsole.MarkupLine($"[yellow]Auto-merging failed; fix conflicts and then commit the result.[/]");
                 return 1;
         }
