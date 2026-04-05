@@ -53,18 +53,14 @@ internal class Repository
         throw new InvalidOperationException("fatal: not a git repository (or any parent directories): .git");
     }
 
-    public GitObject HashObject(string filePath, string type = "blob", bool write = false)
+    public GitBlob HashObject(string filePath, bool write = false)
     {
         byte[] fileContent = WorkingTree.NormalizeLineEndings(File.ReadAllBytes(filePath));
 
-        GitObject gitObject = type switch
-        {
-            "blob" => new GitBlob(fileContent),
-            _ => throw new InvalidOperationException()
-        };
+        GitBlob gitBlob = new GitBlob(fileContent);
 
-        if (write) gitObject.Write(ObjectsDir);
-        return gitObject;
+        if (write) gitBlob.Write(ObjectsDir);
+        return gitBlob;
     }
 
     public string Commit(string message)
@@ -117,7 +113,7 @@ internal class Repository
         foreach (string file in files)
         {
             string relativePath = Path.GetRelativePath(WorkDir, file).Replace('\\', '/');
-            GitBlob blob = (GitBlob)HashObject(file, write: true);
+            GitBlob blob = HashObject(file, write: true);
             index.Add(relativePath, blob, new FileInfo(file));
         }
 
@@ -182,22 +178,22 @@ internal class Repository
     {
         GitTree tree = new GitTree();
 
-        var grouped = entries.GroupBy(e =>
+        IEnumerable<IGrouping<string?, FileEntry>> grouped = entries.GroupBy(e =>
         {
             int slash = e.Path.IndexOf('/');
             return slash == -1 ? (string?)null : e.Path[..slash];
         });
 
-        foreach (var group in grouped)
+        foreach (IGrouping<string?, FileEntry> group in grouped)
         {
             if (group.Key is null)
             {
-                foreach (var entry in group)
+                foreach (FileEntry? entry in group)
                     tree.Entries.Add(new GitTreeEntry { Mode = "100644", Name = entry.Path, Sha = entry.Sha });
             }
             else
             {
-                var subEntries = group.Select(e => new FileEntry(e.Path[(group.Key.Length + 1)..], e.Sha));
+                IEnumerable<FileEntry> subEntries = group.Select(e => new FileEntry(e.Path[(group.Key.Length + 1)..], e.Sha));
                 string subTreeSha = BuildTreeFromIndex(subEntries);
                 tree.Entries.Add(new GitTreeEntry { Mode = "40000", Name = group.Key, Sha = subTreeSha });
             }

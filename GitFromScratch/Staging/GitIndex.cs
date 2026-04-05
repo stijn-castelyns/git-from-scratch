@@ -16,8 +16,6 @@ public class GitIndex
         Load();
     }
 
-    // ──────────────────────── ADD / STAGE ─────────────────────────
-
     public void Add(string relativePath, GitBlob blob, FileInfo fileInfo)
     {
         Entries.RemoveAll(e => e.Path == relativePath);
@@ -54,12 +52,6 @@ public class GitIndex
             .ToList();
     }
 
-    // ──────────────────────── BINARY WRITE ────────────────────────
-
-    /// <summary>
-    /// Writes Git's binary index format (version 2).
-    /// Layout: "DIRC" | version(4) | count(4) | entries... | SHA-1 checksum(20)
-    /// </summary>
     public void Save()
     {
         using MemoryStream ms = new MemoryStream();
@@ -81,8 +73,6 @@ public class GitIndex
         fs.Write(data);
         fs.Write(checksum);
     }
-
-    // ──────────────────────── BINARY READ ─────────────────────────
 
     private void Load()
     {
