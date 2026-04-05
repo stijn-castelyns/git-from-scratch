@@ -127,4 +127,16 @@ internal class Repository
         _workingTree.CheckoutTree(targetSha);
         refs.SetHead(branchName);
     }
+
+    public MergeResult Merge(string branchName)
+    {
+        ReferenceManager refs = new ReferenceManager(GitDir);
+        MergeEngine merger = new MergeEngine(GitDir, ObjectsDir, _workingTree);
+
+        MergeResult? fastForwardResult = merger.TryFastForward(refs, branchName);
+        if (fastForwardResult is not null)
+            return fastForwardResult.Value;
+
+        throw new NotImplementedException("TO-DO: Implement merge logic for non-fast-forward cases");
+    }
 }
