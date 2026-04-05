@@ -46,6 +46,17 @@ internal class ReferenceManager
         File.WriteAllText(refPath, commitSha + "\n");
     }
 
+    public bool BranchExists(string branchName) => File.Exists(BranchRefPath(branchName));
+
+    public string? ResolveBranch(string branchName)
+    {
+        string refPath = BranchRefPath(branchName);
+        return File.Exists(refPath) ? File.ReadAllText(refPath).Trim() : null;
+    }
+
+    public void SetHead(string branchName) =>
+        File.WriteAllText(Path.Combine(_gitDir, "HEAD"), $"ref: refs/heads/{branchName}\n");
+
     private (bool isSymref, string target) ParseHead()
     {
         string content = File.ReadAllText(Path.Combine(_gitDir, "HEAD")).Trim();

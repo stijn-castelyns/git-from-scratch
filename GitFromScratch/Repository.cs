@@ -8,12 +8,14 @@ internal class Repository
     public string WorkDir { get; }
     public string GitDir { get; set; }
     public string ObjectsDir { get; set; }
+    private readonly WorkingTree _workingTree;
 
     private Repository(string workDir)
     {
         WorkDir = Path.GetFullPath(workDir);
         GitDir = Path.Combine(workDir, ".git");
         ObjectsDir = Path.Combine(GitDir, "objects");
+        _workingTree = new WorkingTree(WorkDir, GitDir, ObjectsDir);
     }
 
     public static Repository Init(string path)
@@ -108,5 +110,21 @@ internal class Repository
         refs.UpdateHead(commit.Sha);
 
         return commit.Sha;
+    }
+
+    public void Checkout(string branchName)
+    {
+        ReferenceManager refs = new ReferenceManager(GitDir);
+
+        if (!refs.BranchExists(branchName))
+            throw new InvalidOperationException($"error: pathspec '{branchName}' did not match any branch known to lit");
+        if (refs.GetCurrentBranch() == branchName)
+            throw new InvalidOperationException($"Already on '{branchName}'");
+
+        string targetSha = refs.ResolveBranch(branchName)
+            ?? throw new InvalidOperationException($"fatal: branch '{branchName}' has no commits");
+
+        _workingTree.CheckoutTree(targetSha);
+        refs.SetHead(branchName);
     }
 }

@@ -11,6 +11,7 @@ app.Configure(config =>
     config.AddCommand<WriteTreeCommand>("write-tree");
     config.AddCommand<CommitCommand>("commit");
     config.AddCommand<BranchCommand>("branch");
+    config.AddCommand<CheckoutCommand>("checkout");
 });
 
 return app.Run(args);

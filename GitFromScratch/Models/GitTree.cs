@@ -79,6 +79,34 @@ public class GitTree : GitObject
         return tree;
     }
 
+    public static List<GitTreeEntry> Flatten(string treeSha, string objectsDir)
+    {
+        List<GitTreeEntry> result = new();
+        FlattenRecursive(treeSha, "", objectsDir, result);
+        return result;
+    }
+
+    private static void FlattenRecursive(string treeSha, string prefix, string objectsDir, List<GitTreeEntry> result)
+    {
+        GitObject treeObj = GitObject.Read(treeSha, objectsDir);
+        if (treeObj is not GitTree tree)
+            throw new InvalidOperationException("fatal: expected tree object");
+
+        foreach (GitTreeEntry entry in tree.Entries)
+        {
+            string fullPath = string.IsNullOrEmpty(prefix) ? entry.Name : $"{prefix}/{entry.Name}";
+
+            if (entry.Mode == "40000")
+            {
+                FlattenRecursive(entry.Sha, fullPath, objectsDir, result);
+            }
+            else
+            {
+                result.Add(new GitTreeEntry { Mode = entry.Mode, Name = fullPath, Sha = entry.Sha });
+            }
+        }
+    }
+
     public override byte[] Serialize()
     {
         IOrderedEnumerable<GitTreeEntry> sorted = Entries.OrderBy(e => e.Name, StringComparer.Ordinal);
