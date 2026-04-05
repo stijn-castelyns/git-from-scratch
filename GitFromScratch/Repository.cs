@@ -1,4 +1,5 @@
 using GitFromScratch.Models;
+using GitFromScratch.Staging;
 
 namespace GitFromScratch;
 
@@ -55,5 +56,24 @@ internal class Repository
 
         if (write) gitBlob.Write(ObjectsDir);
         return gitBlob;
+    }
+
+    public void Add(string filePath)
+    {
+        string fullPath = Path.GetFullPath(filePath);
+        IEnumerable<string> files = Directory.Exists(fullPath)
+            ? Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories)
+            : [fullPath];
+
+        GitIndex index = new GitIndex(GitDir);
+        foreach (string file in files)
+        {
+            string relativePath = Path.GetRelativePath(WorkDir, file).Replace('\\', '/');
+            GitBlob blob = HashObject(file, write: true);
+            index.Add(relativePath, blob, new FileInfo(file));
+        }
+
+        index.SortEntries();
+        index.Save();
     }
 }
