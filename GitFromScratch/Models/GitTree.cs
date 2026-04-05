@@ -1,3 +1,4 @@
+using GitFromScratch.Staging;
 using System.Text;
 
 namespace GitFromScratch.Models;
@@ -42,6 +43,42 @@ public class GitTree : GitObject
             i = nullIdx + 21;
         }
     }
+    public static GitTree FromIndex(GitIndex index, string objectsDir)
+    {
+        IEnumerable<(string path, string sha)> entries = index.Entries
+            .Select(e => (e.Path, Convert.ToHexString(e.Sha).ToLower()));
+        return FromEntries(entries, objectsDir);
+    }
+
+    private static GitTree FromEntries(IEnumerable<(string path, string sha)> entries, string objectsDir)
+    {
+        GitTree tree = new GitTree();
+
+        IEnumerable<IGrouping<string?, (string path, string sha)>> grouped = entries.GroupBy(e =>
+        {
+            int slash = e.path.IndexOf('/');
+            return slash == -1 ? (string?)null : e.path[..slash];
+        });
+
+        foreach (IGrouping<string?, (string path, string sha)> group in grouped)
+        {
+            if (group.Key is null)
+            {
+                foreach ((string path, string sha) entry in group)
+                    tree.Entries.Add(new GitTreeEntry { Mode = "100644", Name = entry.path, Sha = entry.sha });
+            }
+            else
+            {
+                IEnumerable<(string path, string sha)> subEntries = group.Select(e => (e.path[(group.Key.Length + 1)..], e.sha));
+                GitTree subTree = FromEntries(subEntries, objectsDir);
+                tree.Entries.Add(new GitTreeEntry { Mode = "40000", Name = group.Key, Sha = subTree.ComputeHash() });
+            }
+        }
+
+        tree.Write(objectsDir);
+        return tree;
+    }
+
     public static List<GitTreeEntry> Flatten(string treeSha, string objectsDir)
     {
         List<GitTreeEntry> result = new();

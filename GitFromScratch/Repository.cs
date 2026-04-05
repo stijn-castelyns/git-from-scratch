@@ -5,8 +5,6 @@ namespace GitFromScratch;
 
 internal class Repository
 {
-    private record FileEntry(string Path, string Sha);
-
     public string WorkDir { get; }
     public string GitDir { get; set; }
     public string ObjectsDir { get; set; }
@@ -69,7 +67,7 @@ internal class Repository
         if (index.Entries.Count == 0)
             throw new InvalidOperationException("nothing to commit");
 
-        string treeSha = BuildTreeFromEntries(index);
+        string treeSha = GitTree.FromIndex(index, ObjectsDir).ComputeHash();
         ReferenceManager refs = new ReferenceManager(GitDir);
         string? parentSha = refs.ResolveHead();
 
@@ -169,41 +167,9 @@ internal class Repository
             return MergeResult.Conflict;
         }
 
-        string treeSha = BuildTreeFromEntries(index);
+        string treeSha = GitTree.FromIndex(index, ObjectsDir).ComputeHash();
         merger.CreateMergeCommit(refs, treeSha, oursSha, theirsSha, branchName);
         return MergeResult.Merged;
     }
 
-    private string BuildTreeFromIndex(IEnumerable<FileEntry> entries)
-    {
-        GitTree tree = new GitTree();
-
-        IEnumerable<IGrouping<string?, FileEntry>> grouped = entries.GroupBy(e =>
-        {
-            int slash = e.Path.IndexOf('/');
-            return slash == -1 ? (string?)null : e.Path[..slash];
-        });
-
-        foreach (IGrouping<string?, FileEntry> group in grouped)
-        {
-            if (group.Key is null)
-            {
-                foreach (FileEntry? entry in group)
-                    tree.Entries.Add(new GitTreeEntry { Mode = "100644", Name = entry.Path, Sha = entry.Sha });
-            }
-            else
-            {
-                IEnumerable<FileEntry> subEntries = group.Select(e => new FileEntry(e.Path[(group.Key.Length + 1)..], e.Sha));
-                string subTreeSha = BuildTreeFromIndex(subEntries);
-                tree.Entries.Add(new GitTreeEntry { Mode = "40000", Name = group.Key, Sha = subTreeSha });
-            }
-        }
-
-        tree.Write(ObjectsDir);
-        return tree.ComputeHash();
-    }
-
-    private string BuildTreeFromEntries(GitIndex index) =>
-        BuildTreeFromIndex(index.Entries.Select(e =>
-            new FileEntry(e.Path, Convert.ToHexString(e.Sha).ToLower())));
 }
