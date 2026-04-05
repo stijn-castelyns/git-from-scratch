@@ -92,6 +92,7 @@ public abstract class GitObject
         {
             "blob" => new GitBlob(content),
             "tree" => new GitTree(content),
+            "commit" => new GitCommit(content),
             _ => throw new NotSupportedException($"Git object type '{type}' is not supported.")
         };
 

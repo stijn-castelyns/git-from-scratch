@@ -76,4 +76,37 @@ internal class Repository
         index.SortEntries();
         index.Save();
     }
+
+    public string Commit(string message)
+    {
+        GitIndex index = new GitIndex(GitDir);
+        if (index.Entries.Count == 0)
+            throw new InvalidOperationException("nothing to commit");
+
+        string treeSha = GitTree.FromIndex(index, ObjectsDir).ComputeHash();
+        ReferenceManager refs = new ReferenceManager(GitDir);
+        string? parentSha = refs.ResolveHead();
+
+        List<string> parents = parentSha is not null ? [parentSha] : [];
+
+        // Abort if tree is identical to parent's tree (nothing changed)
+        if (parentSha is not null)
+        {
+            GitObject parentObj = GitObject.Read(parentSha, ObjectsDir);
+            if (parentObj is GitCommit parentCommit && parentCommit.TreeSha == treeSha)
+                throw new InvalidOperationException("nothing to commit, working tree clean");
+        }
+
+        GitCommit commit = new GitCommit(
+            treeSha: treeSha,
+            parents: parents,
+            author: "Lit User <lit@example.com>",
+            committer: "Lit User <lit@example.com>",
+            message: message);
+
+        commit.Write(ObjectsDir);
+        refs.UpdateHead(commit.Sha);
+
+        return commit.Sha;
+    }
 }

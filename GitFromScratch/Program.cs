@@ -9,6 +9,7 @@ app.Configure(config =>
     config.AddCommand<HashObjectCommand>("hash-object");
     config.AddCommand<AddCommand>("add");
     config.AddCommand<WriteTreeCommand>("write-tree");
+    config.AddCommand<CommitCommand>("commit");
 });
 
 return app.Run(args);
