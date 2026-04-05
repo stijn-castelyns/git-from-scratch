@@ -33,9 +33,25 @@ internal class ReferenceManager
         throw new InvalidOperationException("HEAD is detached.");
     }
 
+    public void CreateBranch(string branchName)
+    {
+        string? commitSha = ResolveHead()
+            ?? throw new InvalidOperationException("fatal: not a valid object name: 'HEAD'");
+
+        string refPath = BranchRefPath(branchName);
+        if (File.Exists(refPath))
+            throw new InvalidOperationException($"fatal: a branch named '{branchName}' already exists");
+
+        Directory.CreateDirectory(Path.GetDirectoryName(refPath)!);
+        File.WriteAllText(refPath, commitSha + "\n");
+    }
+
     private (bool isSymref, string target) ParseHead()
     {
         string content = File.ReadAllText(Path.Combine(_gitDir, "HEAD")).Trim();
         return content.StartsWith("ref: ") ? (true, content[5..]) : (false, content);
     }
+
+    private string BranchRefPath(string name) =>
+    Path.Combine(_gitDir, "refs", "heads", name.Replace('/', Path.DirectorySeparatorChar));
 }

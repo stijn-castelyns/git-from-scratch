@@ -10,6 +10,7 @@ app.Configure(config =>
     config.AddCommand<AddCommand>("add");
     config.AddCommand<WriteTreeCommand>("write-tree");
     config.AddCommand<CommitCommand>("commit");
+    config.AddCommand<BranchCommand>("branch");
 });
 
 return app.Run(args);
