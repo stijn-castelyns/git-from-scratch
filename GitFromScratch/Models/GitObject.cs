@@ -54,4 +54,48 @@ public abstract class GitObject
 
         return Sha;
     }
+
+    /// <summary>
+    /// Reads and decompresses a Git object from disk, returning the appropriate subclass.
+    /// </summary>
+    public static GitObject Read(string sha, string objectsDir)
+    {
+        string dir = Path.Combine(objectsDir, sha[..2]);
+        string file = Path.Combine(dir, sha[2..]);
+
+        if (!File.Exists(file))
+            throw new FileNotFoundException($"Git object {sha} not found.");
+
+        // 1. Read and decompress the entire file
+        using FileStream fs = File.OpenRead(file);
+        using ZLibStream zlib = new ZLibStream(fs, CompressionMode.Decompress);
+        using MemoryStream ms = new MemoryStream();
+        zlib.CopyTo(ms);
+
+        byte[] raw = ms.ToArray();
+
+        // 2. Find the null byte '\0' that separates the header from the content
+        int nullIdx = Array.IndexOf(raw, (byte)0);
+        if (nullIdx == -1)
+            throw new InvalidDataException("Invalid Git object: missing null terminator.");
+
+        // 3. Parse the header (e.g., "blob 14")
+        string header = Encoding.ASCII.GetString(raw, 0, nullIdx);
+        string[] parts = header.Split(' ');
+        string type = parts[0];
+
+        // 4. Extract just the content using C# range operators
+        byte[] content = raw[(nullIdx + 1)..];
+
+        // 5. Instantiate the correct subclass
+        GitObject obj = type switch
+        {
+            "blob" => new GitBlob(content),
+            "tree" => new GitTree(content),
+            _ => throw new NotSupportedException($"Git object type '{type}' is not supported.")
+        };
+
+        obj.Sha = sha;
+        return obj;
+    }
 }

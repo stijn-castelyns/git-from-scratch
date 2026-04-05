@@ -8,6 +8,7 @@ app.Configure(config =>
     config.AddCommand<InitRepoCommand>("init");
     config.AddCommand<HashObjectCommand>("hash-object");
     config.AddCommand<AddCommand>("add");
+    config.AddCommand<WriteTreeCommand>("write-tree");
 });
 
 return app.Run(args);
