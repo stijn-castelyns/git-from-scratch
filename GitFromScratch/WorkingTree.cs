@@ -68,6 +68,28 @@ internal class WorkingTree
         newIndex.Save();
     }
 
+    public void WriteConflictMarkers(string path, string? oursSha, string? theirsSha, string currentBranch, string theirsBranch)
+    {
+        string oursContent = oursSha is not null ? ReadBlobContent(oursSha) : "";
+        string theirsContent = theirsSha is not null ? ReadBlobContent(theirsSha) : "";
+
+        StringBuilder sb = new();
+        sb.AppendLine($"<<<<<<< {currentBranch}");
+        sb.Append(oursContent);
+        if (!oursContent.EndsWith('\n')) sb.AppendLine();
+        sb.AppendLine("=======");
+        sb.Append(theirsContent);
+        if (!theirsContent.EndsWith('\n')) sb.AppendLine();
+        sb.AppendLine($">>>>>>> {theirsBranch}");
+
+        string filePath = ToWorkTreePath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        File.WriteAllText(filePath, sb.ToString());
+    }
+
     public string ToWorkTreePath(string gitPath) =>
         Path.Combine(_workDir, gitPath.Replace('/', Path.DirectorySeparatorChar));
+
+    private string ReadBlobContent(string sha) =>
+        GitObject.Read(sha, _objectsDir) is GitBlob blob ? Encoding.UTF8.GetString(blob.Data) : "";
 }

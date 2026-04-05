@@ -91,8 +91,12 @@ internal class Repository
 
         List<string> parents = parentSha is not null ? [parentSha] : [];
 
+        string mergeHeadPath = Path.Combine(GitDir, "MERGE_HEAD");
+        if (File.Exists(mergeHeadPath))
+            parents.Add(File.ReadAllText(mergeHeadPath).Trim());
+
         // Abort if tree is identical to parent's tree (nothing changed)
-        if (parentSha is not null)
+        if (parentSha is not null && !File.Exists(mergeHeadPath))
         {
             GitObject parentObj = GitObject.Read(parentSha, ObjectsDir);
             if (parentObj is GitCommit parentCommit && parentCommit.TreeSha == treeSha)
@@ -105,9 +109,11 @@ internal class Repository
             author: "Lit User <lit@example.com>",
             committer: "Lit User <lit@example.com>",
             message: message);
-
         commit.Write(ObjectsDir);
         refs.UpdateHead(commit.Sha);
+
+        if (File.Exists(mergeHeadPath))
+            File.Delete(mergeHeadPath);
 
         return commit.Sha;
     }
@@ -137,6 +143,32 @@ internal class Repository
         if (fastForwardResult is not null)
             return fastForwardResult.Value;
 
-        throw new NotImplementedException("TO-DO: Implement merge logic for non-fast-forward cases");
+
+        string currentBranch = refs.GetCurrentBranch();
+        string oursSha = refs.ResolveHead()!;
+        string theirsSha = refs.ResolveBranch(branchName)!;
+        string? baseSha = merger.FindMergeBase(oursSha, theirsSha);
+
+        List<MergeFileResult> results = merger.ResolveFiles(
+            baseFiles: merger.GetTreeFiles(baseSha),
+            oursFiles: merger.GetTreeFiles(oursSha),
+            theirsFiles: merger.GetTreeFiles(theirsSha));
+
+        GitIndex index = new GitIndex(GitDir);
+        index.Entries.Clear();
+        List<string> conflicts = merger.ApplyMergeResults(index, results, currentBranch, branchName);
+
+        index.SortEntries();
+        index.Save();
+
+        if (conflicts.Count > 0)
+        {
+            File.WriteAllText(Path.Combine(GitDir, "MERGE_HEAD"), theirsSha + "\n");
+            return MergeResult.Conflict;
+        }
+
+        string treeSha = GitTree.FromIndex(index, ObjectsDir).ComputeHash();
+        merger.CreateMergeCommit(refs, treeSha, oursSha, theirsSha, branchName);
+        return MergeResult.Merged;
     }
 }

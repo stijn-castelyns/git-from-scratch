@@ -22,6 +22,12 @@ public class MergeCommand : Command<MergeCommand.Settings>
             case MergeResult.FastForward:
                 AnsiConsole.MarkupLine($"[green]Fast-forward[/]");
                 break;
+            case MergeResult.Merged:
+                AnsiConsole.MarkupLine($"[green]Merge made by the 'ort' strategy.[/]");
+                break;
+            case MergeResult.Conflict:
+                AnsiConsole.MarkupLine($"[yellow]Auto-merging failed; fix conflicts and then commit the result.[/]");
+                return 1;
         }
 
         return 0;

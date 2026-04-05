@@ -85,4 +85,15 @@ public class GitIndex
             Entries.Add(GitIndexEntry.ReadFromIndex(br));
         }
     }
+
+    public void AddAtStage(string path, string sha, int stage)
+    {
+        Entries.Add(new GitIndexEntry
+        {
+            Mode = 0x81A4,
+            Sha = Convert.FromHexString(sha),
+            Path = path,
+            Stage = stage
+        });
+    }
 }
