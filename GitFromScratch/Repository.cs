@@ -1,3 +1,5 @@
+using GitFromScratch.Models;
+
 namespace GitFromScratch;
 
 internal class Repository
@@ -43,5 +45,15 @@ internal class Repository
             dir = dir.Parent;
         }
         throw new InvalidOperationException("fatal: not a git repository (or any parent directories): .git");
+    }
+
+    public GitBlob HashObject(string filePath, bool write = false)
+    {
+        byte[] fileContent = WorkingTree.NormalizeLineEndings(File.ReadAllBytes(filePath));
+
+        GitBlob gitBlob = new GitBlob(fileContent);
+
+        if (write) gitBlob.Write(ObjectsDir);
+        return gitBlob;
     }
 }
