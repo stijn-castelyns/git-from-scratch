@@ -28,19 +28,8 @@ internal record MergeFileResult(
     string? OursSha,
     string? TheirsSha);
 
-internal class MergeEngine
+internal class MergeEngine(string objectsDir, WorkingTree workingTree)
 {
-    private readonly string _gitDir;
-    private readonly string _objectsDir;
-    private readonly WorkingTree _workingTree;
-
-    public MergeEngine(string gitDir, string objectsDir, WorkingTree workingTree)
-    {
-        _gitDir = gitDir;
-        _objectsDir = objectsDir;
-        _workingTree = workingTree;
-    }
-
     public MergeResult? TryFastForward(ReferenceManager refs, string branchName)
     {
         if (!refs.BranchExists(branchName))
@@ -55,7 +44,7 @@ internal class MergeEngine
         if (oursSha is null)
         {
             refs.UpdateHead(theirsSha);
-            _workingTree.CheckoutTree(theirsSha);
+            workingTree.CheckoutTree(theirsSha);
             return MergeResult.FastForward;
         }
 
@@ -67,7 +56,7 @@ internal class MergeEngine
         if (baseSha == oursSha)
         {
             refs.UpdateHead(theirsSha);
-            _workingTree.CheckoutTree(theirsSha);
+            workingTree.CheckoutTree(theirsSha);
             return MergeResult.FastForward;
         }
 
@@ -79,34 +68,32 @@ internal class MergeEngine
 
     public string? FindMergeBase(string sha1, string sha2)
     {
-        HashSet<string> ancestors1 = [sha1];
-        HashSet<string> ancestors2 = [sha2];
-        Queue<string> queue1 = new([sha1]);
-        Queue<string> queue2 = new([sha2]);
+        HashSet<string> ancestors = Ancestors(sha1);
+        Queue<string> queue = new([sha2]);
+        HashSet<string> visited = [sha2];
 
-        while (queue1.Count > 0 || queue2.Count > 0)
+        while (queue.TryDequeue(out string? current))
         {
-            if (Step(queue1, ancestors1, ancestors2, out string? found)) return found;
-            if (Step(queue2, ancestors2, ancestors1, out found)) return found;
+            if (ancestors.Contains(current)) return current;
+            if (GitObject.Read(current, objectsDir) is GitCommit commit)
+                foreach (string parent in commit.Parents)
+                    if (visited.Add(parent)) queue.Enqueue(parent);
         }
 
         return null;
+    }
 
-        bool Step(Queue<string> queue, HashSet<string> visited, HashSet<string> other, out string? match)
+    private HashSet<string> Ancestors(string sha)
+    {
+        HashSet<string> set = [];
+        Queue<string> queue = new([sha]);
+        while (queue.TryDequeue(out string? current))
         {
-            match = null;
-            if (queue.Count == 0) return false;
-
-            string current = queue.Dequeue();
-            if (other.Contains(current)) { match = current; return true; }
-
-            if (GitObject.Read(current, _objectsDir) is GitCommit commit)
-                foreach (string parent in commit.Parents)
-                    if (visited.Add(parent))
-                        queue.Enqueue(parent);
-
-            return false;
+            if (!set.Add(current)) continue;
+            if (GitObject.Read(current, objectsDir) is GitCommit commit)
+                foreach (string parent in commit.Parents) queue.Enqueue(parent);
         }
+        return set;
     }
 
     public List<MergeFileResult> ResolveFiles(
@@ -148,8 +135,8 @@ internal class MergeEngine
     public Dictionary<string, string> GetTreeFiles(string? commitSha)
     {
         if (commitSha is null) return new();
-        if (GitObject.Read(commitSha, _objectsDir) is not GitCommit commit) return new();
-        return GitTree.Flatten(commit.TreeSha, _objectsDir).ToDictionary(e => e.Name, e => e.Sha);
+        if (GitObject.Read(commitSha, objectsDir) is not GitCommit commit) return new();
+        return GitTree.Flatten(commit.TreeSha, objectsDir).ToDictionary(e => e.Name, e => e.Sha);
     }
 
     public void CreateMergeCommit(ReferenceManager refs, string treeSha, string oursSha, string theirsSha, string branchName)
@@ -160,7 +147,7 @@ internal class MergeEngine
             author: "Lit User <lit@example.com>",
             committer: "Lit User <lit@example.com>",
             message: $"Merge branch '{branchName}'");
-        mergeCommit.Write(_objectsDir);
+        mergeCommit.Write(objectsDir);
         refs.UpdateHead(mergeCommit.Sha);
     }
 
@@ -176,16 +163,16 @@ internal class MergeEngine
                 case MergeAction.TakeOurs:
                 case MergeAction.TakeTheirs:
                     if (result.BlobSha is not null)
-                        _workingTree.AddToIndexAndWorkTree(index, result.Path, result.BlobSha);
+                        workingTree.AddToIndexAndWorkTree(index, result.Path, result.BlobSha);
                     break;
 
                 case MergeAction.Delete:
-                    _workingTree.DeleteFromWorkTree(result.Path);
+                    workingTree.DeleteFromWorkTree(result.Path);
                     break;
 
                 case MergeAction.Conflict:
                     conflicts.Add(result.Path);
-                    _workingTree.WriteConflictMarkers(result.Path, result.OursSha, result.TheirsSha, currentBranch, theirsBranch);
+                    workingTree.WriteConflictMarkers(result.Path, result.OursSha, result.TheirsSha, currentBranch, theirsBranch);
 
                     if (result.BaseSha is not null)
                         index.AddAtStage(result.Path, result.BaseSha, 1);

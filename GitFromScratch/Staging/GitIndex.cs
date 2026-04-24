@@ -1,20 +1,14 @@
-﻿using GitFromScratch.Models;
+using GitFromScratch.Models;
 using GitFromScratch.Utils;
 using System.Security.Cryptography;
 using System.Text;
 
 namespace GitFromScratch.Staging;
 
-public class GitIndex
+public class GitIndex(string gitDir)
 {
-    private readonly string _indexPath;
-    public List<GitIndexEntry> Entries { get; set; } = new List<GitIndexEntry>();
-
-    public GitIndex(string gitDir)
-    {
-        _indexPath = Path.Combine(gitDir, "index");
-        Load();
-    }
+    private readonly string _indexPath = Path.Combine(gitDir, "index");
+    public List<GitIndexEntry> Entries { get; set; } = LoadEntries(Path.Combine(gitDir, "index"));
 
     public void Add(string relativePath, GitBlob blob, FileInfo fileInfo)
     {
@@ -27,7 +21,7 @@ public class GitIndex
             MTimeSec = (uint)(fileInfo.LastWriteTimeUtc - epoch).TotalSeconds,
             Mode = 0x81A4,
             FileSize = (uint)fileInfo.Length,
-            Sha = Convert.FromHexString(blob.ComputeHash()),
+            Sha = Convert.FromHexString(blob.Sha),
             Path = relativePath,
             Stage = 0
         });
@@ -63,11 +57,11 @@ public class GitIndex
         fs.Write(checksum);
     }
 
-    private void Load()
+    private static List<GitIndexEntry> LoadEntries(string indexPath)
     {
-        if (!File.Exists(_indexPath)) { Entries = new(); return; }
+        if (!File.Exists(indexPath)) return new();
 
-        byte[] data = File.ReadAllBytes(_indexPath);
+        byte[] data = File.ReadAllBytes(indexPath);
         using MemoryStream ms = new MemoryStream(data);
         using BinaryReader br = new BinaryReader(ms);
 
@@ -78,12 +72,10 @@ public class GitIndex
         if (version != 2) throw new InvalidDataException($"Unsupported index version: {version}");
 
         uint count = br.ReadUInt32BE();
-        Entries = new List<GitIndexEntry>((int)count);
-
+        List<GitIndexEntry> entries = new((int)count);
         for (uint idx = 0; idx < count; idx++)
-        {
-            Entries.Add(GitIndexEntry.ReadFromIndex(br));
-        }
+            entries.Add(GitIndexEntry.ReadFromIndex(br));
+        return entries;
     }
 
     public void AddAtStage(string path, string sha, int stage)

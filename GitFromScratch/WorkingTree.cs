@@ -4,19 +4,8 @@ using System.Text;
 
 namespace GitFromScratch;
 
-internal class WorkingTree
+internal class WorkingTree(string workDir, string gitDir, string objectsDir)
 {
-    private readonly string _workDir;
-    private readonly string _gitDir;
-    private readonly string _objectsDir;
-
-    public WorkingTree(string workDir, string gitDir, string objectsDir)
-    {
-        _workDir = workDir;
-        _gitDir = gitDir;
-        _objectsDir = objectsDir;
-    }
-
     public static byte[] NormalizeLineEndings(byte[] data)
     {
         string text = Encoding.UTF8.GetString(data);
@@ -31,7 +20,7 @@ internal class WorkingTree
             File.Delete(filePath);
 
         string? dir = Path.GetDirectoryName(filePath);
-        while (dir != null && dir != _workDir && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
+        while (dir != null && dir != workDir && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
         {
             Directory.Delete(dir);
             dir = Path.GetDirectoryName(dir);
@@ -40,7 +29,7 @@ internal class WorkingTree
 
     public void AddToIndexAndWorkTree(GitIndex index, string path, string blobSha)
     {
-        if (GitObject.Read(blobSha, _objectsDir) is not GitBlob blob)
+        if (GitObject.Read(blobSha, objectsDir) is not GitBlob blob)
             throw new InvalidOperationException($"fatal: expected blob for {path}");
 
         string filePath = ToWorkTreePath(path);
@@ -51,21 +40,19 @@ internal class WorkingTree
 
     public void CheckoutTree(string commitSha)
     {
-        GitIndex currentIndex = new GitIndex(_gitDir);
-        foreach (GitIndexEntry entry in currentIndex.Entries)
+        GitIndex index = new GitIndex(gitDir);
+        foreach (GitIndexEntry entry in index.Entries)
             DeleteFromWorkTree(entry.Path);
+        index.Entries.Clear();
 
-        if (GitObject.Read(commitSha, _objectsDir) is not GitCommit targetCommit)
+        if (GitObject.Read(commitSha, objectsDir) is not GitCommit target)
             throw new InvalidOperationException("fatal: not a commit object");
 
-        GitIndex newIndex = new GitIndex(_gitDir);
-        newIndex.Entries.Clear();
+        foreach (GitTreeEntry treeEntry in GitTree.Flatten(target.TreeSha, objectsDir))
+            AddToIndexAndWorkTree(index, treeEntry.Name, treeEntry.Sha);
 
-        foreach (GitTreeEntry treeEntry in GitTree.Flatten(targetCommit.TreeSha, _objectsDir))
-            AddToIndexAndWorkTree(newIndex, treeEntry.Name, treeEntry.Sha);
-
-        newIndex.SortEntries();
-        newIndex.Save();
+        index.SortEntries();
+        index.Save();
     }
 
     public void WriteConflictMarkers(string path, string? oursSha, string? theirsSha, string currentBranch, string theirsBranch)
@@ -88,8 +75,8 @@ internal class WorkingTree
     }
 
     public string ToWorkTreePath(string gitPath) =>
-        Path.Combine(_workDir, gitPath.Replace('/', Path.DirectorySeparatorChar));
+        Path.Combine(workDir, gitPath.Replace('/', Path.DirectorySeparatorChar));
 
     private string ReadBlobContent(string sha) =>
-        GitObject.Read(sha, _objectsDir) is GitBlob blob ? Encoding.UTF8.GetString(blob.Data) : "";
+        GitObject.Read(sha, objectsDir) is GitBlob blob ? Encoding.UTF8.GetString(blob.Data) : "";
 }

@@ -1,4 +1,4 @@
-﻿namespace GitFromScratch.Models;
+namespace GitFromScratch.Models;
 
 public class GitBlob : GitObject
 {
@@ -8,7 +8,6 @@ public class GitBlob : GitObject
     public GitBlob(byte[] data)
     {
         Data = data;
-        ComputeHash();
     }
 
     public override byte[] Serialize() => Data;

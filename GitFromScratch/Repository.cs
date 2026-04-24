@@ -85,7 +85,7 @@ internal class Repository
         if (index.Entries.Count == 0)
             throw new InvalidOperationException("nothing to commit");
 
-        string treeSha = GitTree.FromIndex(index, ObjectsDir).ComputeHash();
+        string treeSha = GitTree.FromIndex(index, ObjectsDir).Sha;
         ReferenceManager refs = new ReferenceManager(GitDir);
         string? parentSha = refs.ResolveHead();
 
@@ -95,13 +95,10 @@ internal class Repository
         if (File.Exists(mergeHeadPath))
             parents.Add(File.ReadAllText(mergeHeadPath).Trim());
 
-        // Abort if tree is identical to parent's tree (nothing changed)
-        if (parentSha is not null && !File.Exists(mergeHeadPath))
-        {
-            GitObject parentObj = GitObject.Read(parentSha, ObjectsDir);
-            if (parentObj is GitCommit parentCommit && parentCommit.TreeSha == treeSha)
-                throw new InvalidOperationException("nothing to commit, working tree clean");
-        }
+        if (parentSha is not null && !File.Exists(mergeHeadPath)
+            && GitObject.Read(parentSha, ObjectsDir) is GitCommit parentCommit
+            && parentCommit.TreeSha == treeSha)
+            throw new InvalidOperationException("nothing to commit, working tree clean");
 
         GitCommit commit = new GitCommit(
             treeSha: treeSha,
@@ -122,13 +119,10 @@ internal class Repository
     {
         ReferenceManager refs = new ReferenceManager(GitDir);
 
-        if (!refs.BranchExists(branchName))
-            throw new InvalidOperationException($"error: pathspec '{branchName}' did not match any branch known to lit");
+        string targetSha = refs.ResolveBranch(branchName)
+            ?? throw new InvalidOperationException($"error: pathspec '{branchName}' did not match any branch known to lit");
         if (refs.GetCurrentBranch() == branchName)
             throw new InvalidOperationException($"Already on '{branchName}'");
-
-        string targetSha = refs.ResolveBranch(branchName)
-            ?? throw new InvalidOperationException($"fatal: branch '{branchName}' has no commits");
 
         _workingTree.CheckoutTree(targetSha);
         refs.SetHead(branchName);
@@ -137,7 +131,7 @@ internal class Repository
     public MergeResult Merge(string branchName)
     {
         ReferenceManager refs = new ReferenceManager(GitDir);
-        MergeEngine merger = new MergeEngine(GitDir, ObjectsDir, _workingTree);
+        MergeEngine merger = new MergeEngine(ObjectsDir, _workingTree);
 
         MergeResult? fastForwardResult = merger.TryFastForward(refs, branchName);
         if (fastForwardResult is not null)
@@ -167,7 +161,7 @@ internal class Repository
             return MergeResult.Conflict;
         }
 
-        string treeSha = GitTree.FromIndex(index, ObjectsDir).ComputeHash();
+        string treeSha = GitTree.FromIndex(index, ObjectsDir).Sha;
         merger.CreateMergeCommit(refs, treeSha, oursSha, theirsSha, branchName);
         return MergeResult.Merged;
     }
